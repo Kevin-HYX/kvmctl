@@ -1,0 +1,19 @@
+[screen]
+enabled = true
+# Leave empty for automatic selection when exactly one V4L2 source exists.
+# Prefer a stable path from: kvmctl devices screen
+device = ""
+capture_timeout = "3s"
+
+[keyboard]
+enabled = true
+device = "/dev/hidg0"
+
+[pointer]
+absolute_enabled = true
+absolute_device = "/dev/hidg1"
+relative_enabled = true
+relative_device = "/dev/hidg2"
+
+[mcp]
+control_lease = "30s"

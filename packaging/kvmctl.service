@@ -1,0 +1,28 @@
+[Unit]
+Description=kvmctl AI-facing KVM service
+After=network.target kvmctl-gadget.service
+Requires=kvmctl-gadget.service
+
+[Service]
+Type=simple
+User=kvmctl
+Group=kvmctl
+ExecStart=/usr/local/bin/kvmctl mcp --transport http --listen 127.0.0.1:8080
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadOnlyPaths=/etc/kvmctl
+SupplementaryGroups=video
+
+[Install]
+WantedBy=multi-user.target

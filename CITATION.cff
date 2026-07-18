@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "如果你在研究或作品中使用了 kvmctl，请引用本项目。"
+title: "kvmctl"
+type: software
+authors:
+  - name: "Kevin-HYX and kvmctl contributors"
+license: Apache-2.0
+repository-code: "https://github.com/Kevin-HYX/kvmctl"
+url: "https://github.com/Kevin-HYX/kvmctl"
