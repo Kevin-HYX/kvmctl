@@ -1,133 +1,220 @@
 # kvmctl
 
-`kvmctl` 是一个面向外部 AI 的开源 KVM 控制服务。它在低成本 Linux 控制设备上采集被控主机的屏幕画面，并把自身模拟成 USB 键盘和鼠标，让 AI 能通过 SSH 或 MCP 完成“观察—决策—操作”的控制循环。
+[![CI](https://github.com/Kevin-HYX/kvmctl/actions/workflows/ci.yml/badge.svg)](https://github.com/Kevin-HYX/kvmctl/actions/workflows/ci.yml)
+[![最新版本](https://img.shields.io/github/v/release/Kevin-HYX/kvmctl?display_name=tag)](https://github.com/Kevin-HYX/kvmctl/releases/latest)
+[![许可证](https://img.shields.io/github/license/Kevin-HYX/kvmctl)](LICENSE)
+[![Go](https://img.shields.io/github/go-mod/go-version/Kevin-HYX/kvmctl)](go.mod)
 
-> 当前仓库已包含可运行的 CLI、MCP Server、V4L2 采集、USB Gadget HID 和浏览器实时控制实现，并已在香橙派 One 上完成采集、键鼠与公网控制链路验收；项目尚未发布稳定版本。
+**把一块低成本 Linux 开发板变成面向 AI 和浏览器的硬件级 KVM。**
 
-## 目标
+`kvmctl` 从被控主机的 HDMI 输出采集画面，并通过 USB Gadget 模拟键盘和鼠标。外部 AI 可以经 SSH 启动 MCP Server，完成人机界面上的“观察、判断、操作”循环；人类也可以临时打开浏览器控制页，直接接管键盘和鼠标。
 
-- 优先适配香橙派及其 Linux 生态。
-- 通过 HDMI 采集设备获得被控主机画面。
-- 通过 Linux USB Gadget HID 向被控主机发送键盘、鼠标输入。
-- 同一个 `kvmctl` 程序同时提供人类可调试的 CLI、AI 可调用的 MCP，以及临时授权的浏览器实时控制页。
-- 让采集与输入硬件保持可替换，以支持虚拟测试环境和其他 Linux 板卡。
-- 在 32 位 ARM、512 MB 内存等级的设备上保持可部署性。
+它不依赖被控主机的操作系统、远程桌面服务或网络连接，因此可以操作 BIOS/UEFI、引导程序、系统安装界面以及失去网络的主机。
 
-## 硬件支持等级
+> 香橙派 One 是当前唯一完成真机验收的一级支持硬件。其他具备 Linux、视频采集和 USB Device/OTG 能力的板卡属于实验性适配。
 
-- **一级支持：香橙派 One。** 项目提供完整安装、接线和配置说明，相关发布必须经过真实板卡验收。
-- **实验性：其他 Linux 板卡。** 具备可用画面来源和 USB Device/OTG 控制器的设备可以尝试运行，但首版不承诺硬件验证或兼容性。
-- **虚拟测试：x86_64 Linux 虚拟机。** 仅验证 CLI、MCP、坐标视图和虚拟输入，不代表真实 USB OTG 或 HDMI 采集已经通过。
+## 为什么使用 kvmctl
 
-## 非目标
+- **AI 原生控制接口**：内置 MCP Server，工具和错误均为结构化定义，并提供自描述资源帮助 AI 自动理解能力。
+- **覆盖操作系统之外的界面**：输入以真实 USB HID 设备呈现，可用于 BIOS/UEFI、启动菜单和系统安装程序。
+- **人类随时接管**：通过一次性链接打开浏览器控制页；人类输入优先于 MCP，空闲五秒后自动释放控制权。
+- **实时优先的视频链路**：浏览器默认使用 WebRTC 传输 MJPEG，拥塞时丢弃旧画面而不是持续累积延迟；WebSocket 转发模式始终可手动选择。
+- **明确的安全边界**：服务只监听回环地址，不向 AI 暴露 Shell、文件传输、配置修改或提权入口。
+- **为低成本硬件设计**：核心程序是单文件 Go 二进制，可部署到 ARMv7、ARM64 和 AMD64 Linux。
 
-- 不在控制设备上运行 AI 模型。
-- 不在设备端解释“安装系统”等高层任务。
-- 不提供任意 Shell 命令执行工具。
-- 不把远程桌面协议伪装成硬件级 KVM；目标是能够观察 BIOS、引导程序和操作系统安装界面。
-
-## 使用方式
+## 工作原理
 
 ```text
-外部 AI
-  │  MCP
-  ▼
-kvmctl serve（控制设备）
-  ├─ HDMI 采集 → 屏幕观察
-  ├─ 浏览器 → 1080p/30 FPS 实时操作
-  └─ USB Gadget HID → 键盘/鼠标动作
-                         │
-                         ▼
-                      被控主机
+                         ┌─────────────────────┐
+       MCP / 浏览器      │   Linux 控制设备     │
+  AI 或人类 ───────────▶ │      kvmctl         │
+                         │                     │
+被控主机 HDMI ─▶ 采集卡 ─▶│ V4L2 画面采集       │
+                         │                     │
+被控主机 USB  ◀───────── │ USB Gadget HID      │
+                         └─────────────────────┘
+                              键盘 + 双指针
 ```
 
-```shell
-# 验证配置和硬件
-kvmctl config validate --file /etc/kvmctl/config.toml
+画面和输入是两条独立链路：
+
+1. 被控主机的 HDMI 输出经 USB 采集卡进入控制设备的 USB Host 口。
+2. 控制设备的 USB OTG/Device 口连接被控主机的 USB Host 口，并模拟键盘、绝对指针和相对指针。
+3. AI 通过 MCP 获取当前截图并发送原子输入操作；人类可通过临时浏览器会话观察和控制。
+
+## 功能概览
+
+| 能力 | 说明 |
+| --- | --- |
+| 屏幕观察 | 直接通过 Linux V4L2 读取 MJPEG 或 YUYV，不依赖 FFmpeg；无信号时明确失败，不返回旧画面 |
+| 键盘 | 组合键、有限时长按键和 US 布局 ASCII 文本输入；动作结束后自动释放 |
+| 绝对指针 | 使用与分辨率无关的 `0～1000` 归一化坐标，适合桌面和多数图形界面 |
+| 相对指针 | 发送 HID 相对移动量，作为 BIOS/UEFI 或特殊固件的兼容模式 |
+| MCP | 支持 stdio 和 Streamable HTTP，工具列表根据有效配置动态公布 |
+| 浏览器控制 | 固定 `1920×1080`、最高 30 FPS，支持 WebRTC 直连与显式 WebSocket 转发 |
+| 控制权仲裁 | 多客户端可同时观察，任意时刻只有一个参与者能够输入；人类浏览器优先 |
+| 诊断 | `status`、`doctor` 和设备发现命令提供结构化运行状态与恢复建议 |
+
+## 硬件要求
+
+一级支持组合：
+
+- 香橙派 One；
+- 可运行 Armbian 的 microSD 卡与稳定的独立 5V 电源；
+- 支持 `1920×1080 @ 30 FPS` MJPEG 或 YUYV 的 UVC HDMI 采集卡；
+- 一条 HDMI 线；
+- 一条包含数据线芯、支持 USB Device/OTG 的 USB 线；
+- 具有 HDMI 输出和 USB Host 接口的被控主机。
+
+不要使用 USB-A 公对公线连接两个 Host 端口。连接器外形相同也不代表线缆包含数据线芯或支持 Device 模式。详细接线、内核要求和真机验收基线见[香橙派 One 指南](docs/hardware/orangepi-one.md)。
+
+## 快速开始
+
+### 1. 下载并安装
+
+以下示例适用于香橙派 One。请先在控制设备上安装 `git`、`curl` 和 `coreutils`：
+
+```sh
+git clone https://github.com/Kevin-HYX/kvmctl.git
+cd kvmctl
+
+curl -fLO https://github.com/Kevin-HYX/kvmctl/releases/latest/download/kvmctl-linux-armv7
+curl -fLO https://github.com/Kevin-HYX/kvmctl/releases/latest/download/SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
+
+sudo ./scripts/install.sh ./kvmctl-linux-armv7
+```
+
+其他 Linux 架构可分别下载 `kvmctl-linux-arm64` 或 `kvmctl-linux-amd64`。发布页同时提供所有文件的 SHA-256 校验值。
+
+### 2. 配置和检查
+
+```sh
+sudoedit /etc/kvmctl/config.toml
+
+sudo kvmctl config validate --file /etc/kvmctl/config.toml
+sudo kvmctl devices screen
+sudo kvmctl doctor
+```
+
+只有一个采集设备时可以保留 `screen.device = ""` 让程序自动发现；存在多个设备时，应使用 `kvmctl devices screen` 返回的 `/dev/v4l/by-id/` 稳定路径。完整字段说明见[配置文档](docs/configuration.md)。
+
+### 3. 启动服务
+
+```sh
+sudo systemctl enable --now kvmctl.service
+sudo systemctl status kvmctl-gadget.service kvmctl.service
+```
+
+`kvmctl-gadget.service` 在开机时以 root 创建 USB Gadget；长期运行的 `kvmctl.service` 使用无登录权限的专用用户，并只通过设备权限访问视频和 HID 节点。
+
+## 让 AI 通过 SSH 使用 MCP
+
+最简单的远程方式是让 MCP 客户端以 SSH 作为 stdio 传输层：
+
+```toml
+[mcp_servers.kvmctl]
+command = "ssh"
+args = ["orangepi", "kvmctl", "mcp", "--transport", "stdio"]
+```
+
+其中 `orangepi` 是本机 `~/.ssh/config` 中配置的主机别名。连接后，AI 可以从 `tools/list` 自动发现当前可用操作，也可以读取以下资源：
+
+- `kvmctl://guide`：推荐控制流程与坐标约定；
+- `kvmctl://key-names`：键盘工具支持的按键名称；
+- `kvmctl://errors`：稳定错误码及恢复建议。
+
+主要 MCP 工具包括：
+
+- `get_status`、`get_screen`；
+- `key_press`、`type_text`；
+- 绝对移动、点击与拖拽；
+- 相对移动、点击、拖拽与滚轮；
+- `release_all`、`release_control`；
+- 浏览器会话的创建、状态查询和关闭。
+
+完整参数和错误定义见 [MCP 操作面](docs/spec/operations-v0.1.md)。
+
+## 本机 CLI
+
+CLI 与 MCP 使用相同的控制核心，适合安装验收和故障排查：
+
+```sh
+# 检查运行状态和硬件
 kvmctl status
 kvmctl doctor
 kvmctl devices screen
 
-# 人类调试：只有显式 --output 才会写截图
+# 截取带坐标标注的当前画面
 kvmctl screen --view coordinates --format jpeg --output screen.jpg
+
+# 发送键盘和鼠标操作
 kvmctl key press ctrl alt delete
 kvmctl mouse click-absolute --x 500 --y 500 --button left
 
-# MCP stdio Server
-kvmctl mcp --transport stdio
+# 紧急释放全部按键和鼠标按钮
+kvmctl release-all
+```
 
-# MCP Streamable HTTP，只允许回环地址
-kvmctl mcp --transport http --listen 127.0.0.1:8080
+## 浏览器控制
 
-# 生产统一服务：/mcp 与 /control/*，仍只允许回环地址
+统一服务在回环地址同时提供 MCP 与浏览器控制端点：
+
+```sh
 kvmctl serve --listen 127.0.0.1:8080
 ```
 
-MCP 提供 `get_status`、`get_screen`、`key_press`、`type_text`、绝对与相对鼠标操作、滚轮、`release_all` 和 `release_control`。统一服务额外提供 `browser_session_open`、`browser_session_status`、`browser_session_close`，让 AI 创建十分钟内可单次兑换的浏览器控制入口。工具列表按照有效配置动态公布；瞬时硬件不可用通过状态和稳定错误码表达。AI 还可以读取 `kvmctl://guide`、`kvmctl://key-names`、`kvmctl://errors` 三个自描述资源。
+AI 调用 `browser_session_open` 后会得到一个十分钟内可兑换一次的临时入口。页面连接后不设置固定会话时长；断线有六十秒重连窗口，最后一次输入五秒后立即释放控制权。
 
-绝对指针统一使用左上角 `(0,0)`、右下角 `(1000,1000)` 的固定坐标，不要求操作携带观察对象或预先调用 `get_screen`。相对指针发送有符号 HID 移动量，用于固件兼容兜底，不承诺与屏幕像素一一对应。
+浏览器默认尝试 WebRTC 直连，并通过独立 DataChannel 传输画面和可靠控制消息。若网络环境无法直连，操作者可以在页面中显式切换到 WebSocket 转发模式；服务不会在后台静默切换传输路径。协议细节见[浏览器传输说明](docs/spec/browser-transports-v0.2.md)。
 
-`type_text` 只接受按 US 键盘布局可确定输入的 ASCII 字符；USB HID 发送的是物理按键而不是 Unicode，非 ASCII 输入会明确失败。
+## 安全说明
 
-多个客户端可以同时获取观察，但任意时刻只有一个参与者能发送输入动作。浏览器人类操作优先于 MCP；浏览器最后一次输入五秒后自动释放控制权但保持画面连接。MCP 的首个输入动作隐式取得控制权，活跃调用自动维持。控制权到期、页面失焦或连接断开时，设备会自动释放全部按键和鼠标按钮。
+拥有 `kvmctl` 控制权限，等同于拥有被控主机的本地屏幕、键盘和鼠标访问权限。
 
-浏览器会话默认使用 WebRTC：一个不重传的无序 DataChannel 发送固定 `1920×1080、最高 30 FPS` 的 MJPEG，另一个可靠有序 DataChannel 发送键盘、鼠标、状态和错误消息。视频拥塞时允许丢弃旧帧以保证实时性，控制消息不丢弃。控制页永久保留显式 WebSocket 转发模式，可在同一会话内由人类操作员双向切换；连接失败时不会静默改走另一种传输。控制页同时提供绝对鼠标、Pointer Lock 相对鼠标和 BIOS 常用特殊键工具栏。采集设备若不能提供该分辨率会明确报错，不会静默降级为较低分辨率。
+- MCP HTTP 和统一服务只允许监听回环地址，不能直接暴露到局域网或公网。
+- 远程访问应由可信边缘代理终止 HTTPS、验证身份、限制请求频率，再转发到控制设备。
+- 浏览器入口使用 256 位随机令牌，只能兑换一次；入口 URL 的查询参数不得写入访问日志。
+- 截图默认只在内存中处理，CLI 只有在显式指定输出路径时才写入磁盘。
+- 日志不记录截图、文本输入内容、具体按键、坐标或完整工具参数。
+- MCP 不提供任意 Shell、文件传输、配置写入、软件升级或提权工具。
 
-屏幕观察只返回本次请求实际采集到的当前帧。无视频信号、采集超时或采集设备不可用时会返回明确错误，不会把缓存画面冒充当前状态。
+漏洞请按照[安全策略](SECURITY.md)私下报告，不要在公开 Issue 中披露。
 
-默认画面来源会自动发现 Linux 视频采集设备：只发现一个时自动使用，未发现时报告未连接，发现多个时要求管理员明确选择。配置固定设备时优先使用 `/dev/v4l/by-id/` 下的稳定路径，避免 USB 插拔后误选设备。
+## 已知边界
 
-一级支持的画面来源直接使用 Linux V4L2，首版支持常见 USB 采集卡的 MJPEG 与 YUYV 输出，不依赖 FFmpeg。设备只提供其他格式时会明确失败，并由 `kvmctl doctor` 列出检测结果。
-
-## 安全边界
-
-拥有 `kvmctl` 控制权限等同于拥有被控主机的本地键盘、鼠标和屏幕访问权限。stdio、MCP Streamable HTTP 和统一服务中的 HTTP 监听器都只能绑定回环地址，不接受局域网或公网监听地址。需要远程访问时，应由受信任边缘代理终止 HTTPS、验证 MCP Bearer Token、执行限流，再转发到私有通道。详细漏洞报告方式见 [SECURITY.md](SECURITY.md)。
-
-截图默认只在内存中处理和返回，除非管理员通过 CLI 明确指定输出文件。日志不记录图像、`type_text` 内容或完整工具参数，只保留工具名、耗时、结果代码和匿名 Session 元数据。
-
-长期运行的 `kvmctl` 服务使用专用非 root 用户。只有开机时创建 USB Gadget 与设置设备权限的一次性准备步骤使用 root；MCP 不提供提权或系统修复入口。
-
-## 安装到 Linux 控制设备
-
-下载与架构匹配的二进制并校验 `SHA256SUMS`，在仓库根目录显式执行：
-
-```shell
-sudo ./scripts/install.sh ./kvmctl-linux-armv7
-sudoedit /etc/kvmctl/config.toml
-sudo /usr/local/bin/kvmctl doctor
-sudo systemctl enable --now kvmctl.service
-```
-
-安装脚本只复制文件、创建受限用户并刷新 systemd；它不会自动启用服务。Gadget 初始化由 root oneshot 服务执行，MCP 长期进程以 `kvmctl` 用户运行。接线与首次验收见[香橙派 One 指南](docs/hardware/orangepi-one.md)。
-
-## 当前路线
-
-1. 固化香橙派 One 的重复部署与硬件回归流程。
-2. 扩充 BIOS/UEFI、不同 NAT 和不同采集卡的兼容性记录。
-3. 发布首个带校验值的多架构版本。
-4. 将其他具备 USB Device/OTG 能力的 Linux 板卡保持为实验性适配。
+- 当前不支持电源、复位或 ATX GPIO 控制。
+- USB HID 发送物理按键，不是 Unicode；`type_text` 只支持 US 键盘布局下可确定输入的可打印 ASCII。
+- 浏览器视频要求采集设备提供 `1920×1080 @ 30 FPS` 的 MJPEG 或 YUYV，不会静默降级到较低分辨率。
+- 首版 WebRTC 支持 STUN，不内置 TURN；复杂 NAT 环境可能需要使用 WebSocket 转发。
+- 绝对指针取决于被控固件对 USB HID Absolute Pointer 的支持；不兼容时应切换为相对指针。
+- 除香橙派 One 外的 Linux 板卡尚未纳入一级硬件回归。
 
 ## 文档
 
-- [领域语言](CONTEXT.md)
-- [架构决策记录](docs/adr/)
-- [v0.1 操作面](docs/spec/operations-v0.1.md)
-- [浏览器传输 v0.2](docs/spec/browser-transports-v0.2.md)
 - [配置说明](docs/configuration.md)
 - [香橙派 One 接线与验收](docs/hardware/orangepi-one.md)
+- [MCP 操作面](docs/spec/operations-v0.1.md)
+- [浏览器传输说明](docs/spec/browser-transports-v0.2.md)
+- [架构决策记录](docs/adr/)
 - [贡献指南](CONTRIBUTING.md)
+- [获取帮助](SUPPORT.md)
 - [安全策略](SECURITY.md)
 
-## 发布形式
+## 构建与测试
 
-GitHub Release 工作流生成带 SHA-256 校验值的 `linux-armv7`、`linux-arm64` 和 `linux-amd64` 单文件程序；香橙派 One 使用一级支持的 armv7 构建，其他架构暂列实验性。仓库提供由用户明确执行的安装脚本，用于安装程序、systemd 服务、配置目录和设备权限，但不发布完整系统镜像。`kvmctl doctor` 用于检查 Linux、UDC、视频设备与权限状态。
+```sh
+go test ./...
+go vet ./...
+go build ./cmd/kvmctl
+```
 
-系统安装默认读取 `/etc/kvmctl/config.toml`，开发和虚拟机测试可通过显式 `--config` 指定其他路径。程序不自动读取当前目录配置，MCP 不提供配置写入工具；配置更新只有在完整校验通过后才原子生效。
+CI 还会执行竞态检测、浏览器传输测试、Gadget 脚本测试，以及 Linux ARMv7、ARM64 和 AMD64 交叉构建。以 `v` 开头的标签会生成三种架构的发布文件与 `SHA256SUMS`。
+
+## 参与贡献
+
+欢迎提交可复现的缺陷、硬件兼容性记录和改进建议。硬件相关报告请注明板卡型号、系统镜像、内核版本、设备树、USB 控制器模式、采集卡能力和实际接线方式。开始实现前请先阅读[贡献指南](CONTRIBUTING.md)。
 
 ## 许可证
 
 本项目采用 [Apache License 2.0](LICENSE)。
-
----
-
-`kvmctl` is an open-source, AI-facing KVM control service. It exposes on-demand V4L2 screen capture and atomic USB Gadget HID input through a CLI and MCP stdio/Streamable HTTP server. Orange Pi One is the sole tier-1 hardware target; other Linux boards are experimental.
