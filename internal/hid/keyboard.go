@@ -46,6 +46,16 @@ func (keyboard *Keyboard) Release() error {
 	return keyboard.sink.Write(make([]byte, 8))
 }
 
+func (keyboard *Keyboard) Set(keys []string) error {
+	report, err := keyboardReport(keys)
+	if err != nil {
+		return err
+	}
+	keyboard.mu.Lock()
+	defer keyboard.mu.Unlock()
+	return keyboard.sink.Write(report)
+}
+
 func (keyboard *Keyboard) Type(text string, interval time.Duration) error {
 	keyboard.mu.Lock()
 	defer keyboard.mu.Unlock()

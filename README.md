@@ -2,14 +2,14 @@
 
 `kvmctl` 是一个面向外部 AI 的开源 KVM 控制服务。它在低成本 Linux 控制设备上采集被控主机的屏幕画面，并把自身模拟成 USB 键盘和鼠标，让 AI 能通过 SSH 或 MCP 完成“观察—决策—操作”的控制循环。
 
-> 当前仓库已包含可运行的 CLI、MCP Server、V4L2 采集和 USB Gadget HID 实现。香橙派 One 的真实硬件验收尚未完成，因此暂未发布稳定版本。
+> 当前仓库已包含可运行的 CLI、MCP Server、V4L2 采集、USB Gadget HID 和浏览器实时控制实现，并已在香橙派 One 上完成采集、键鼠与公网控制链路验收；项目尚未发布稳定版本。
 
 ## 目标
 
 - 优先适配香橙派及其 Linux 生态。
 - 通过 HDMI 采集设备获得被控主机画面。
 - 通过 Linux USB Gadget HID 向被控主机发送键盘、鼠标输入。
-- 同一个 `kvmctl` 程序同时提供人类可调试的 CLI 和 AI 可调用的 MCP stdio Server。
+- 同一个 `kvmctl` 程序同时提供人类可调试的 CLI、AI 可调用的 MCP，以及临时授权的浏览器实时控制页。
 - 让采集与输入硬件保持可替换，以支持虚拟测试环境和其他 Linux 板卡。
 - 在 32 位 ARM、512 MB 内存等级的设备上保持可部署性。
 
@@ -32,8 +32,9 @@
 外部 AI
   │  MCP
   ▼
-kvmctl mcp（控制设备）
+kvmctl serve（控制设备）
   ├─ HDMI 采集 → 屏幕观察
+  ├─ 浏览器 → 1080p/30 FPS 实时操作
   └─ USB Gadget HID → 键盘/鼠标动作
                          │
                          ▼
@@ -57,15 +58,20 @@ kvmctl mcp --transport stdio
 
 # MCP Streamable HTTP，只允许回环地址
 kvmctl mcp --transport http --listen 127.0.0.1:8080
+
+# 生产统一服务：/mcp 与 /control/*，仍只允许回环地址
+kvmctl serve --listen 127.0.0.1:8080
 ```
 
-MCP 提供 `get_status`、`get_screen`、`key_press`、`type_text`、绝对与相对鼠标操作、滚轮、`release_all` 和 `release_control`。工具列表按照有效配置动态公布；瞬时硬件不可用通过状态和稳定错误码表达。AI 还可以读取 `kvmctl://guide`、`kvmctl://key-names`、`kvmctl://errors` 三个自描述资源。
+MCP 提供 `get_status`、`get_screen`、`key_press`、`type_text`、绝对与相对鼠标操作、滚轮、`release_all` 和 `release_control`。统一服务额外提供 `browser_session_open`、`browser_session_status`、`browser_session_close`，让 AI 创建十分钟内可单次兑换的浏览器控制入口。工具列表按照有效配置动态公布；瞬时硬件不可用通过状态和稳定错误码表达。AI 还可以读取 `kvmctl://guide`、`kvmctl://key-names`、`kvmctl://errors` 三个自描述资源。
 
 绝对指针统一使用左上角 `(0,0)`、右下角 `(1000,1000)` 的固定坐标，不要求操作携带观察对象或预先调用 `get_screen`。相对指针发送有符号 HID 移动量，用于固件兼容兜底，不承诺与屏幕像素一一对应。
 
 `type_text` 只接受按 US 键盘布局可确定输入的 ASCII 字符；USB HID 发送的是物理按键而不是 Unicode，非 ASCII 输入会明确失败。
 
-多个客户端可以同时获取观察，但任意时刻只有一个 MCP Session 能持有控制权并发送输入动作。首个输入动作会隐式取得控制权，活跃调用自动维持；AI 无需执行取得或续租流程。控制权到期或 Session 断开时，设备会自动释放全部按键和鼠标按钮。
+多个客户端可以同时获取观察，但任意时刻只有一个参与者能发送输入动作。浏览器人类操作优先于 MCP；浏览器最后一次输入五秒后自动释放控制权但保持画面连接。MCP 的首个输入动作隐式取得控制权，活跃调用自动维持。控制权到期、页面失焦或连接断开时，设备会自动释放全部按键和鼠标按钮。
+
+浏览器会话默认使用 WebRTC：一个不重传的无序 DataChannel 发送固定 `1920×1080、最高 30 FPS` 的 MJPEG，另一个可靠有序 DataChannel 发送键盘、鼠标、状态和错误消息。视频拥塞时允许丢弃旧帧以保证实时性，控制消息不丢弃。控制页永久保留显式 WebSocket 转发模式，可在同一会话内由人类操作员双向切换；连接失败时不会静默改走另一种传输。控制页同时提供绝对鼠标、Pointer Lock 相对鼠标和 BIOS 常用特殊键工具栏。采集设备若不能提供该分辨率会明确报错，不会静默降级为较低分辨率。
 
 屏幕观察只返回本次请求实际采集到的当前帧。无视频信号、采集超时或采集设备不可用时会返回明确错误，不会把缓存画面冒充当前状态。
 
@@ -75,7 +81,7 @@ MCP 提供 `get_status`、`get_screen`、`key_press`、`type_text`、绝对与�
 
 ## 安全边界
 
-拥有 `kvmctl` 控制权限等同于拥有被控主机的本地键盘、鼠标和屏幕访问权限。首个版本计划同时支持 stdio 和 MCP Streamable HTTP；HTTP 模式只能绑定回环地址，不接受局域网或公网监听地址。详细漏洞报告方式见 [SECURITY.md](SECURITY.md)。
+拥有 `kvmctl` 控制权限等同于拥有被控主机的本地键盘、鼠标和屏幕访问权限。stdio、MCP Streamable HTTP 和统一服务中的 HTTP 监听器都只能绑定回环地址，不接受局域网或公网监听地址。需要远程访问时，应由受信任边缘代理终止 HTTPS、验证 MCP Bearer Token、执行限流，再转发到私有通道。详细漏洞报告方式见 [SECURITY.md](SECURITY.md)。
 
 截图默认只在内存中处理和返回，除非管理员通过 CLI 明确指定输出文件。日志不记录图像、`type_text` 内容或完整工具参数，只保留工具名、耗时、结果代码和匿名 Session 元数据。
 
@@ -96,8 +102,8 @@ sudo systemctl enable --now kvmctl.service
 
 ## 当前路线
 
-1. 在到货的香橙派 One 上完成供电、UDC、三路 HID 与采集卡真实验收。
-2. 完成外部 AI 端到端控制循环与 BIOS/UEFI 兼容性记录。
+1. 固化香橙派 One 的重复部署与硬件回归流程。
+2. 扩充 BIOS/UEFI、不同 NAT 和不同采集卡的兼容性记录。
 3. 发布首个带校验值的多架构版本。
 4. 将其他具备 USB Device/OTG 能力的 Linux 板卡保持为实验性适配。
 
@@ -106,6 +112,7 @@ sudo systemctl enable --now kvmctl.service
 - [领域语言](CONTEXT.md)
 - [架构决策记录](docs/adr/)
 - [v0.1 操作面](docs/spec/operations-v0.1.md)
+- [浏览器传输 v0.2](docs/spec/browser-transports-v0.2.md)
 - [配置说明](docs/configuration.md)
 - [香橙派 One 接线与验收](docs/hardware/orangepi-one.md)
 - [贡献指南](CONTRIBUTING.md)

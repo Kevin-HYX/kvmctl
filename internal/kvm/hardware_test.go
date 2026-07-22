@@ -19,6 +19,7 @@ func (keyboard *fakeKeyboard) Press([]string, time.Duration) error {
 }
 
 func (keyboard *fakeKeyboard) Type(string, time.Duration) error { return nil }
+func (keyboard *fakeKeyboard) Set([]string) error               { return nil }
 func (keyboard *fakeKeyboard) Release() error {
 	keyboard.released++
 	return nil

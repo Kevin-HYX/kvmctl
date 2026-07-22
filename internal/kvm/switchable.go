@@ -10,6 +10,9 @@ type OperationalController interface {
 	GetScreen(context.Context, ScreenRequest) (ScreenResult, error)
 	KeyPress(context.Context, KeyPressRequest) error
 	TypeText(context.Context, TypeTextRequest) error
+	SetKeyboardState(context.Context, KeyboardStateRequest) error
+	SetPointerAbsoluteState(context.Context, AbsolutePointerStateRequest) error
+	SetPointerRelativeState(context.Context, RelativePointerStateRequest) error
 	MouseMoveAbsolute(context.Context, AbsoluteMoveRequest) error
 	MouseClickAbsolute(context.Context, AbsoluteClickRequest) error
 	MouseDragAbsolute(context.Context, AbsoluteDragRequest) error
@@ -19,6 +22,7 @@ type OperationalController interface {
 	MouseScroll(context.Context, ScrollRequest) error
 	ReleaseAll(context.Context) error
 	ReleaseControl(context.Context) error
+	OpenVideoStream(context.Context) (VideoStream, error)
 }
 
 type SwitchableController struct {
@@ -58,6 +62,18 @@ func (controller *SwitchableController) TypeText(ctx context.Context, request Ty
 	return controller.load().TypeText(ctx, request)
 }
 
+func (controller *SwitchableController) SetKeyboardState(ctx context.Context, request KeyboardStateRequest) error {
+	return controller.load().SetKeyboardState(ctx, request)
+}
+
+func (controller *SwitchableController) SetPointerAbsoluteState(ctx context.Context, request AbsolutePointerStateRequest) error {
+	return controller.load().SetPointerAbsoluteState(ctx, request)
+}
+
+func (controller *SwitchableController) SetPointerRelativeState(ctx context.Context, request RelativePointerStateRequest) error {
+	return controller.load().SetPointerRelativeState(ctx, request)
+}
+
 func (controller *SwitchableController) MouseMoveAbsolute(ctx context.Context, request AbsoluteMoveRequest) error {
 	return controller.load().MouseMoveAbsolute(ctx, request)
 }
@@ -92,4 +108,8 @@ func (controller *SwitchableController) ReleaseAll(ctx context.Context) error {
 
 func (controller *SwitchableController) ReleaseControl(ctx context.Context) error {
 	return controller.load().ReleaseControl(ctx)
+}
+
+func (controller *SwitchableController) OpenVideoStream(ctx context.Context) (VideoStream, error) {
+	return controller.load().OpenVideoStream(ctx)
 }

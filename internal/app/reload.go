@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/Kevin-HYX/kvmctl/internal/config"
 	"github.com/Kevin-HYX/kvmctl/internal/kvm"
@@ -17,6 +18,9 @@ func ReloadController(path string, previous config.Config, controller *kvm.Switc
 	}
 	if candidate.MCP.ControlLease != previous.MCP.ControlLease {
 		return previous, fmt.Errorf("changing mcp.control_lease requires a service restart")
+	}
+	if !reflect.DeepEqual(candidate.Server, previous.Server) {
+		return previous, fmt.Errorf("changing server configuration requires a service restart")
 	}
 	controller.Swap(BuildController(candidate))
 	return candidate, nil

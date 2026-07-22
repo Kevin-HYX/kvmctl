@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,17 @@ func TestVersionReportsProgramVersion(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestServeRejectsNonLoopbackListenBeforeStarting(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exitCode := cli.Run(context.Background(), []string{"serve", "--listen", "0.0.0.0:8080"}, &stdout, &stderr, cli.Dependencies{
+		Controller:  kvm.NewMemoryController(kvm.MemoryOptions{}),
+		HTTPHandler: http.NotFoundHandler(),
+	})
+	if exitCode != 1 || !strings.Contains(stderr.String(), "loopback") {
+		t.Fatalf("exit=%d stderr=%q, want loopback rejection", exitCode, stderr.String())
 	}
 }
 

@@ -17,6 +17,14 @@ func ServeStdio(ctx context.Context, server *mcp.Server) error {
 }
 
 func ServeHTTP(ctx context.Context, address string, server *mcp.Server) error {
+	return ServeHTTPHandler(ctx, address, NewHTTPHandler(server))
+}
+
+func NewHTTPHandler(server *mcp.Server) http.Handler {
+	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+}
+
+func ServeHTTPHandler(ctx context.Context, address string, handler http.Handler) error {
 	if err := ValidateLoopbackListen(address); err != nil {
 		return err
 	}
@@ -25,7 +33,7 @@ func ServeHTTP(ctx context.Context, address string, server *mcp.Server) error {
 		return fmt.Errorf("listen for MCP HTTP: %w", err)
 	}
 	httpServer := &http.Server{
-		Handler:           mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	done := make(chan struct{})

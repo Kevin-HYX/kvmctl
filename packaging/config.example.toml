@@ -4,6 +4,8 @@ enabled = true
 # Prefer a stable path from: kvmctl devices screen
 device = ""
 capture_timeout = "3s"
+# Discard startup frames emitted before the HDMI image stabilizes.
+warmup_frames = 90
 
 [keyboard]
 enabled = true
@@ -17,3 +19,13 @@ relative_device = "/dev/hidg2"
 
 [mcp]
 control_lease = "30s"
+
+[server]
+# Public HTTPS origin returned by browser_session_open and accepted by browser transport origin checks.
+public_origin = "https://kvm.example.com:18443"
+
+[server.webrtc]
+enabled = true
+# Set to [] to disable public STUN discovery while keeping WebRTC host candidates.
+stun_urls = ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"]
+connect_timeout = "10s"

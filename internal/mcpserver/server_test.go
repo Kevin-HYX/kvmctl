@@ -3,9 +3,11 @@ package mcpserver_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
+	"net/url"
 	"sort"
 	"strings"
 	"testing"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/Kevin-HYX/kvmctl/internal/kvm"
 	"github.com/Kevin-HYX/kvmctl/internal/mcpserver"
+	"github.com/Kevin-HYX/kvmctl/internal/webcontrol"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -66,6 +69,59 @@ func TestToolsListOnlyPublishesConfiguredCapabilities(t *testing.T) {
 		if got[index] != want[index] {
 			t.Fatalf("tools = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestBrowserSessionLifecycleToolsAreSelfContained(t *testing.T) {
+	controller := kvm.NewMemoryController(kvm.MemoryOptions{})
+	sessions := webcontrol.NewSessionManager(webcontrol.SessionOptions{
+		PublicOrigin:   "https://120.26.145.91:18443",
+		EntryTTL:       time.Minute,
+		ReconnectGrace: time.Minute,
+	})
+	server := mcpserver.NewWithOptions("0.1.0-test", controller, mcpserver.Options{
+		ControlLease:    time.Second,
+		BrowserSessions: sessions,
+	})
+	ctx := context.Background()
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	client, err := mcp.NewClient(&mcp.Implementation{Name: "browser-test", Version: "0.1.0"}, nil).Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	opened, err := client.CallTool(ctx, &mcp.CallToolParams{Name: "browser_session_open", Arguments: map[string]any{}})
+	if err != nil || opened.IsError {
+		t.Fatalf("open result=%#v err=%v", opened, err)
+	}
+	text := opened.Content[0].(*mcp.TextContent).Text
+	var entry webcontrol.Entry
+	if err := json.Unmarshal([]byte(text), &entry); err != nil {
+		t.Fatalf("decode entry: %v", err)
+	}
+	parsed, err := url.Parse(entry.EntryURL)
+	if err != nil || parsed.Query().Get("token") == "" {
+		t.Fatalf("entry URL = %q, err=%v", entry.EntryURL, err)
+	}
+
+	busy, err := client.CallTool(ctx, &mcp.CallToolParams{Name: "browser_session_open", Arguments: map[string]any{}})
+	if err != nil || !busy.IsError || !strings.Contains(busy.Content[0].(*mcp.TextContent).Text, "BROWSER_SESSION_BUSY") {
+		t.Fatalf("busy result=%#v err=%v", busy, err)
+	}
+
+	status, err := client.CallTool(ctx, &mcp.CallToolParams{Name: "browser_session_status", Arguments: map[string]any{}})
+	if err != nil || status.IsError || !strings.Contains(status.Content[0].(*mcp.TextContent).Text, "entry_pending") {
+		t.Fatalf("status result=%#v err=%v", status, err)
+	}
+	closed, err := client.CallTool(ctx, &mcp.CallToolParams{Name: "browser_session_close", Arguments: map[string]any{}})
+	if err != nil || closed.IsError || !strings.Contains(closed.Content[0].(*mcp.TextContent).Text, `"closed":true`) {
+		t.Fatalf("close result=%#v err=%v", closed, err)
 	}
 }
 

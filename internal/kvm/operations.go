@@ -87,32 +87,69 @@ type ScrollRequest struct {
 type EventKind string
 
 const (
-	EventKeyPress       EventKind = "key_press"
-	EventTypeText       EventKind = "type_text"
-	EventAbsoluteMove   EventKind = "absolute_move"
-	EventAbsoluteClick  EventKind = "absolute_click"
-	EventAbsoluteDrag   EventKind = "absolute_drag"
-	EventRelativeMove   EventKind = "relative_move"
-	EventClick          EventKind = "click"
-	EventRelativeDrag   EventKind = "relative_drag"
-	EventScroll         EventKind = "scroll"
-	EventReleaseAll     EventKind = "release_all"
-	EventReleaseControl EventKind = "release_control"
+	EventKeyPress             EventKind = "key_press"
+	EventTypeText             EventKind = "type_text"
+	EventAbsoluteMove         EventKind = "absolute_move"
+	EventAbsoluteClick        EventKind = "absolute_click"
+	EventAbsoluteDrag         EventKind = "absolute_drag"
+	EventRelativeMove         EventKind = "relative_move"
+	EventClick                EventKind = "click"
+	EventRelativeDrag         EventKind = "relative_drag"
+	EventScroll               EventKind = "scroll"
+	EventReleaseAll           EventKind = "release_all"
+	EventReleaseControl       EventKind = "release_control"
+	EventKeyboardState        EventKind = "keyboard_state"
+	EventAbsolutePointerState EventKind = "absolute_pointer_state"
+	EventRelativePointerState EventKind = "relative_pointer_state"
 )
 
 type Event struct {
-	Kind   EventKind
-	Keys   []string
-	Text   string
-	DX     int
-	DY     int
-	X      int
-	Y      int
-	ToX    int
-	ToY    int
-	Button string
-	Clicks int
-	Delta  int
+	Kind    EventKind
+	Keys    []string
+	Text    string
+	DX      int
+	DY      int
+	X       int
+	Y       int
+	ToX     int
+	ToY     int
+	Button  string
+	Buttons []string
+	Clicks  int
+	Delta   int
+}
+
+func (controller *MemoryController) SetKeyboardState(_ context.Context, request KeyboardStateRequest) error {
+	if !controller.status.Keyboard.Configured {
+		return capabilityNotConfigured("keyboard")
+	}
+	if err := validateKeyboardState(request); err != nil {
+		return err
+	}
+	controller.appendEvents(Event{Kind: EventKeyboardState, Keys: append([]string(nil), request.Keys...)})
+	return nil
+}
+
+func (controller *MemoryController) SetPointerAbsoluteState(_ context.Context, request AbsolutePointerStateRequest) error {
+	if !controller.status.Pointer.Absolute.Configured {
+		return capabilityNotConfigured("absolute pointer")
+	}
+	if err := validateAbsolutePointerState(request); err != nil {
+		return err
+	}
+	controller.appendEvents(Event{Kind: EventAbsolutePointerState, X: request.X, Y: request.Y, Buttons: append([]string(nil), request.Buttons...), Delta: request.Wheel})
+	return nil
+}
+
+func (controller *MemoryController) SetPointerRelativeState(_ context.Context, request RelativePointerStateRequest) error {
+	if !controller.status.Pointer.Relative.Configured {
+		return capabilityNotConfigured("relative pointer")
+	}
+	if err := validateRelativePointerState(request); err != nil {
+		return err
+	}
+	controller.appendEvents(Event{Kind: EventRelativePointerState, DX: request.DX, DY: request.DY, Buttons: append([]string(nil), request.Buttons...), Delta: request.Wheel})
+	return nil
 }
 
 func (controller *MemoryController) KeyPress(_ context.Context, request KeyPressRequest) error {

@@ -46,3 +46,36 @@ func TestRelativePointerSplitsMovementAndClickReleases(t *testing.T) {
 		t.Fatalf("release report = %v, want zeros", got)
 	}
 }
+
+func TestPointerStateSupportsHeldButtons(t *testing.T) {
+	absoluteSink := &recordingSink{}
+	absolute := hid.NewAbsolutePointer(absoluteSink, func(time.Duration) {})
+	if err := absolute.Set(250, 750, []string{"left", "right"}, 0); err != nil {
+		t.Fatalf("absolute.Set(): %v", err)
+	}
+	if got := absoluteSink.reports[0][0]; got != 3 {
+		t.Fatalf("absolute buttons = %d, want left+right", got)
+	}
+
+	relativeSink := &recordingSink{}
+	relative := hid.NewRelativePointer(relativeSink, func(time.Duration) {})
+	if err := relative.Set(300, -260, []string{"middle"}, -1); err != nil {
+		t.Fatalf("relative.Set(): %v", err)
+	}
+	if len(relativeSink.reports) != 3 {
+		t.Fatalf("reports = %#v, want split movement", relativeSink.reports)
+	}
+	for _, report := range relativeSink.reports {
+		if report[0] != 4 {
+			t.Fatalf("report = %v, want held middle button", report)
+		}
+	}
+	if got := int8(relativeSink.reports[0][3]); got != -1 {
+		t.Fatalf("first wheel = %d, want -1", got)
+	}
+	for _, report := range relativeSink.reports[1:] {
+		if report[3] != 0 {
+			t.Fatalf("wheel repeated in report %v", report)
+		}
+	}
+}

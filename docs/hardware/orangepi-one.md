@@ -16,8 +16,21 @@
 
 - Linux 内核提供 ConfigFS、`libcomposite`、UDC 和 `usb_f_hid`；
 - `/sys/class/udc/` 中恰好有一个可用控制器，多个时通过 `KVMCTL_UDC` 明确选择；
+- `kvmctl-gadget.service` 会在启动时等待 UDC 最多 60 秒，并在创建失败时清理不完整的 ConfigFS gadget；可通过 `KVMCTL_UDC_WAIT_SECONDS` 调整等待时间；
 - 采集设备出现在 `/dev/v4l/by-id/` 或 `/dev/video*`；
+- 对启动时先输出测试图的采集设备，通过 `screen.warmup_frames` 丢弃预热帧；默认值为 90；
 - 长期服务用户只通过 `video` 组与 Gadget 脚本授予的设备权限访问硬件。
+
+## 已完成的真机验收基线
+
+2026-07-21 在香橙派 One 真板完成了当前部署验收，后续硬件相关改动应至少与这组基线对照：
+
+- 板卡与体系结构：Xunlong Orange Pi One，Allwinner H3，ARMv7；
+- 系统与内核：Armbian，`Linux 6.18.33-current-sunxi`；
+- 设备树：`/boot/dtb/sun8i-h3-orangepi-one.dtb`，兼容串为 `xunlong,orangepi-one`、`allwinner,sun8i-h3`；
+- USB Device 控制器：设备树节点 `soc/usb@1c19000` 的 `dr_mode` 为 `otg`，运行时 UDC 为 `musb-hdrc.4.auto`，驱动为 `musb-hdrc`，模式为 `b_peripheral`；
+- 实际连接：独立 5V 电源供电，HDMI 经 USB 采集卡进入 USB Host，板载 OTG 数据口连接被控主机 USB Host；
+- Gadget 结果：UDC 状态为 `configured`，`/dev/hidg0`、`/dev/hidg1`、`/dev/hidg2` 均生成并归属 `root:kvmctl`。
 
 ## 验收顺序
 

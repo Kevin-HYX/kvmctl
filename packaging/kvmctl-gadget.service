@@ -1,12 +1,12 @@
 [Unit]
 Description=Prepare kvmctl USB Gadget HID functions
-DefaultDependencies=no
 After=sys-kernel-config.mount systemd-modules-load.service
 Before=kvmctl.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+TimeoutStartSec=75s
 ExecStart=/usr/local/lib/kvmctl/setup-gadget.sh up
 ExecStop=/usr/local/lib/kvmctl/setup-gadget.sh down
 

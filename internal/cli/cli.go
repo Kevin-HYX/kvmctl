@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"time"
 
 	"github.com/Kevin-HYX/kvmctl/internal/config"
@@ -17,6 +18,7 @@ type Dependencies struct {
 	Version      string
 	Controller   kvm.Controller
 	ControlLease time.Duration
+	HTTPHandler  http.Handler
 }
 
 // Run executes one CLI invocation and returns its process exit code.
@@ -72,10 +74,25 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, deps Depe
 		}
 		return 0
 	}
+	if len(args) == 3 && args[0] == "serve" && args[1] == "--listen" {
+		if deps.HTTPHandler == nil {
+			fmt.Fprintln(stderr, "serve: unified HTTP handler is not configured")
+			return 1
+		}
+		if err := mcpserver.ValidateLoopbackListen(args[2]); err != nil {
+			fmt.Fprintf(stderr, "serve: %v\n", err)
+			return 1
+		}
+		if err := mcpserver.ServeHTTPHandler(ctx, args[2], deps.HTTPHandler); err != nil {
+			fmt.Fprintf(stderr, "serve: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	if handled, exitCode := runControllerCommand(ctx, args, stdout, stderr, deps.Controller); handled {
 		return exitCode
 	}
 
-	fmt.Fprintln(stderr, "usage: kvmctl <version|status|config|mcp|screen|key|text|mouse|release-all>")
+	fmt.Fprintln(stderr, "usage: kvmctl <version|status|config|mcp|serve|screen|key|text|mouse|release-all>")
 	return 2
 }

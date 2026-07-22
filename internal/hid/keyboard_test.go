@@ -74,3 +74,21 @@ func TestKeyboardTypesPrintableASCIIUsingUSLayout(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyboardSetKeepsKeysPressedUntilASeparateRelease(t *testing.T) {
+	sink := &recordingSink{}
+	keyboard := hid.NewKeyboard(sink, func(time.Duration) {})
+
+	if err := keyboard.Set([]string{"ctrl", "a"}); err != nil {
+		t.Fatalf("Set(): %v", err)
+	}
+	if len(sink.reports) != 1 || string(sink.reports[0]) != string([]byte{0x01, 0, 0x04, 0, 0, 0, 0, 0}) {
+		t.Fatalf("reports = %#v, want one held ctrl+a report", sink.reports)
+	}
+	if err := keyboard.Set(nil); err != nil {
+		t.Fatalf("Set(nil): %v", err)
+	}
+	if len(sink.reports) != 2 || string(sink.reports[1]) != string(make([]byte, 8)) {
+		t.Fatalf("reports = %#v, want explicit release", sink.reports)
+	}
+}

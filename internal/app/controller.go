@@ -31,7 +31,7 @@ func BuildController(configuration config.Config) *kvm.HardwareController {
 			}
 		}
 		if screenPath != "" {
-			options.Screen = capture.NewV4L2Source(screenPath, configuration.Screen.CaptureTimeout)
+			options.Screen = capture.NewV4L2Source(screenPath, configuration.Screen.CaptureTimeout, configuration.Screen.WarmupFrames)
 			options.ScreenProbe = fileProbe(screenPath)
 		}
 	}

@@ -139,6 +139,22 @@
 
 当前持有者主动释放全部输入状态并交还控制权。普通 AI 控制循环无需调用。
 
+### 浏览器控制会话
+
+只在统一 `serve` 模式中公布。控制设备全局最多存在一个待兑换入口或浏览器会话。
+
+#### `browser_session_open`
+
+创建十分钟内可单次兑换的浏览器入口，返回 `entry_url` 和 `expires_at`。已有入口或会话时返回 `BROWSER_SESSION_BUSY`、当前状态以及可推导时的 `retry_at`；不返回或复用既有令牌，也不自动终止操作者。
+
+#### `browser_session_status`
+
+返回 `none | entry_pending | connected | reconnecting`，不包含入口令牌、会话 Cookie 或其他秘密。
+
+#### `browser_session_close`
+
+撤销待兑换入口或立即终止活动连接，并释放全部浏览器输入状态。操作幂等。
+
 ## MCP 资源
 
 - `kvmctl://guide`: 推荐控制流程和安全边界
@@ -158,6 +174,7 @@ CLI 与 MCP 使用同一个控制核心。管理功能不作为 MCP 工具暴露
 - `kvmctl config validate --file <path>`: 验证配置但不修改系统
 - `kvmctl mcp --transport stdio`: 启动 stdio MCP Server
 - `kvmctl mcp --transport http --listen <loopback>`: 启动 Streamable HTTP MCP Server；拒绝非回环地址
+- `kvmctl serve --listen <loopback>`: 在同一回环地址提供 `/mcp` 和 `/control/*` 统一服务
 - `kvmctl screen ...`: 取得屏幕图像
 - `kvmctl key press ...`: 执行原子按键
 - `kvmctl text type ...`: 输入 US ASCII 文本
@@ -185,6 +202,7 @@ CLI 与 MCP 使用同一个控制核心。管理功能不作为 MCP 工具暴露
 - `CAPTURE_TIMEOUT`: 本次截图未在时限内完成
 - `HOST_DISCONNECTED`: 被控端尚未枚举或已经断开输入设备
 - `CONTROL_BUSY`: 另一 MCP Session 正在控制
+- `BROWSER_SESSION_BUSY`: 已有浏览器入口或控制会话占用全局槽位
 - `INPUT_FAILED`: HID 报告写入失败
 - `OPERATION_TIMEOUT`: 原子输入动作超过时限并已执行释放
 - `INTERNAL_ERROR`: 未归类内部错误；不得把它伪装成成功
@@ -206,9 +224,9 @@ CLI 与 MCP 使用同一个控制核心。管理功能不作为 MCP 工具暴露
 - 任意 Shell 命令执行
 - 文件上传或下载
 - 被控主机剪贴板与 Unicode 注入
-- 未经限制的 `key_down/key_up`、`mouse_down/mouse_up`
+- 面向 MCP 的未经限制 `key_down/key_up`、`mouse_down/mouse_up`；有状态输入只存在于受保护的单一浏览器会话
 - 电源、复位或 ATX GPIO 控制
-- 连续视频流
+- 面向 MCP 的连续视频流；浏览器会话使用固定上限的实时 MJPEG
 - 配置修改、软件升级或系统服务管理的 MCP 工具
 - 直接监听局域网或公网地址的 MCP HTTP 模式
 

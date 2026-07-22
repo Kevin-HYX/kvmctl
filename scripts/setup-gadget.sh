@@ -1,7 +1,12 @@
 #!/bin/bash
-set -euo pipefail
+set -Eeuo pipefail
 
-GADGET=/sys/kernel/config/usb_gadget/kvmctl
+CONFIGFS_ROOT=${KVMCTL_CONFIGFS_ROOT:-/sys/kernel/config}
+UDC_CLASS=${KVMCTL_UDC_CLASS:-/sys/class/udc}
+DEV_ROOT=${KVMCTL_DEV_ROOT:-/dev}
+GADGET_NAME=${KVMCTL_GADGET_NAME:-kvmctl}
+UDC_WAIT_SECONDS=${KVMCTL_UDC_WAIT_SECONDS:-60}
+GADGET="$CONFIGFS_ROOT/usb_gadget/$GADGET_NAME"
 ACTION=${1:-up}
 
 require_root() {
@@ -11,25 +16,57 @@ require_root() {
     fi
 }
 
-select_udc() {
+select_udc_once() {
     if [ -n "${KVMCTL_UDC:-}" ]; then
-        [ -e "/sys/class/udc/$KVMCTL_UDC" ] || {
-            echo "configured KVMCTL_UDC does not exist" >&2
-            exit 1
-        }
+        [ -e "$UDC_CLASS/$KVMCTL_UDC" ] || return 1
         printf '%s' "$KVMCTL_UDC"
         return
     fi
-    set -- /sys/class/udc/*
-    [ -e "$1" ] || {
-        echo "no USB Device Controller found" >&2
-        exit 1
-    }
+    set -- "$UDC_CLASS"/*
+    [ -e "$1" ] || return 1
     [ "$#" -eq 1 ] || {
         echo "multiple USB Device Controllers found; set KVMCTL_UDC" >&2
-        exit 1
+        return 2
     }
     basename "$1"
+}
+
+wait_for_udc() {
+    case "$UDC_WAIT_SECONDS" in
+        ''|*[!0-9]*)
+            echo "KVMCTL_UDC_WAIT_SECONDS must be a non-negative integer" >&2
+            return 1
+            ;;
+    esac
+
+    deadline=$((SECONDS + UDC_WAIT_SECONDS))
+    while true; do
+        if udc=$(select_udc_once); then
+            printf '%s' "$udc"
+            return
+        else
+            status=$?
+        fi
+        [ "$status" -ne 2 ] || return 1
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            if [ -n "${KVMCTL_UDC:-}" ]; then
+                echo "configured KVMCTL_UDC did not appear within ${UDC_WAIT_SECONDS}s" >&2
+            else
+                echo "no USB Device Controller appeared within ${UDC_WAIT_SECONDS}s" >&2
+            fi
+            return 1
+        fi
+        sleep 0.2
+    done
+}
+
+hid_nodes_ready() {
+    [ -e "$DEV_ROOT/hidg0" ] && [ -e "$DEV_ROOT/hidg1" ] && [ -e "$DEV_ROOT/hidg2" ]
+}
+
+apply_hid_permissions() {
+    chgrp kvmctl "$DEV_ROOT/hidg0" "$DEV_ROOT/hidg1" "$DEV_ROOT/hidg2"
+    chmod 0660 "$DEV_ROOT/hidg0" "$DEV_ROOT/hidg1" "$DEV_ROOT/hidg2"
 }
 
 write_keyboard_descriptor() {
@@ -46,11 +83,19 @@ write_relative_descriptor() {
 
 bring_up() {
     modprobe libcomposite
-    mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config
-    [ ! -e "$GADGET" ] || {
-        echo "kvmctl gadget already exists" >&2
-        exit 1
-    }
+    mountpoint -q "$CONFIGFS_ROOT" || mount -t configfs none "$CONFIGFS_ROOT"
+
+    if [ -d "$GADGET" ] && [ -s "$GADGET/UDC" ] && hid_nodes_ready; then
+        apply_hid_permissions
+        return
+    fi
+    if [ -e "$GADGET" ]; then
+        echo "removing incomplete $GADGET_NAME gadget" >&2
+        bring_down
+    fi
+
+    udc=$(wait_for_udc)
+    trap rollback_gadget ERR
     mkdir "$GADGET"
     printf '0x1d6b' > "$GADGET/idVendor"
     printf '0x0104' > "$GADGET/idProduct"
@@ -88,13 +133,13 @@ bring_up() {
     ln -s "$GADGET/functions/hid.usb0" "$GADGET/configs/c.1/"
     ln -s "$GADGET/functions/hid.usb1" "$GADGET/configs/c.1/"
     ln -s "$GADGET/functions/hid.usb2" "$GADGET/configs/c.1/"
-    select_udc > "$GADGET/UDC"
+    printf '%s' "$udc" > "$GADGET/UDC"
 
     attempt=0
     while [ "$attempt" -lt 50 ]; do
-        if [ -e /dev/hidg0 ] && [ -e /dev/hidg1 ] && [ -e /dev/hidg2 ]; then
-            chgrp kvmctl /dev/hidg0 /dev/hidg1 /dev/hidg2
-            chmod 0660 /dev/hidg0 /dev/hidg1 /dev/hidg2
+        if hid_nodes_ready; then
+            apply_hid_permissions
+            trap - ERR
             return
         fi
         attempt=$((attempt + 1))
@@ -106,11 +151,24 @@ bring_up() {
 
 bring_down() {
     [ -d "$GADGET" ] || return 0
-    printf '' > "$GADGET/UDC"
+    if [ -e "$GADGET/UDC" ]; then
+        printf '' > "$GADGET/UDC" || true
+    fi
     rm -f "$GADGET/configs/c.1/hid.usb0" "$GADGET/configs/c.1/hid.usb1" "$GADGET/configs/c.1/hid.usb2"
-    rmdir "$GADGET/functions/hid.usb0" "$GADGET/functions/hid.usb1" "$GADGET/functions/hid.usb2"
-    rmdir "$GADGET/configs/c.1/strings/0x409" "$GADGET/configs/c.1"
-    rmdir "$GADGET/strings/0x409" "$GADGET"
+    rmdir "$GADGET/functions/hid.usb0" "$GADGET/functions/hid.usb1" "$GADGET/functions/hid.usb2" 2>/dev/null || true
+    rmdir "$GADGET/configs/c.1/strings/0x409" "$GADGET/configs/c.1" 2>/dev/null || true
+    rmdir "$GADGET/strings/0x409" 2>/dev/null || true
+    rmdir "$GADGET" 2>/dev/null || {
+        echo "unable to remove incomplete $GADGET_NAME gadget" >&2
+        return 1
+    }
+}
+
+rollback_gadget() {
+    status=$?
+    trap - ERR
+    bring_down || true
+    exit "$status"
 }
 
 require_root

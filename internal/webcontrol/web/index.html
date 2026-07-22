@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>kvmctl</title>
+  <link rel="stylesheet" href="/control/style.css">
+</head>
+<body>
+<div id="control-surface" class="control-surface">
+  <header class="control-bar">
+    <strong class="wordmark">kvmctl</strong>
+    <div class="transport-switch" role="group" aria-label="连接方式">
+      <button id="transport-direct" class="active" type="button" aria-pressed="true">直连</button>
+      <button id="transport-relayed" type="button" aria-pressed="false">转发</button>
+    </div>
+    <div class="health" aria-label="连接状态">
+      <details class="connection-details">
+        <summary id="connection" class="badge waiting">正在连接</summary>
+        <div class="connection-panel">
+          <div><span>连接方式</span><strong id="connection-kind">直连</strong></div>
+          <div><span>传输协议</span><strong id="connection-protocol">UDP</strong></div>
+          <div><span>加密</span><strong>DTLS</strong></div>
+          <p>不会显示或记录双方的具体网络地址。</p>
+        </div>
+      </details>
+      <span id="connection-rtt" class="metric">— ms</span>
+      <span id="connection-fps" class="metric">— FPS</span>
+      <span id="video" class="sr-only">等待画面</span>
+    </div>
+    <div class="actions">
+      <button id="special-keys-toggle" type="button" aria-expanded="false" aria-controls="special-keys">特殊按键</button>
+      <button id="pointer-mode" type="button">绝对鼠标</button>
+      <button id="fullscreen" type="button">全屏</button>
+      <button id="release-all" class="danger" type="button">释放输入</button>
+    </div>
+    <section id="special-keys" class="special-keys" aria-label="特殊按键工具栏" hidden>
+      <div class="keyboard-tray">
+        <div class="key-row modifiers">
+          <button type="button" data-modifier="ctrl">Ctrl</button>
+          <button type="button" data-modifier="alt">Alt</button>
+          <button type="button" data-modifier="shift">Shift</button>
+          <button type="button" data-modifier="meta">Win</button>
+          <button type="button" data-chord="ctrl,alt,delete">Ctrl+Alt+Delete</button>
+        </div>
+        <div class="key-row">
+          <button type="button" data-key="escape">Esc</button>
+          <button type="button" data-key="tab">Tab</button>
+          <button type="button" data-key="delete">Del</button>
+          <button type="button" data-key="enter">Enter</button>
+          <button type="button" data-key="f1">F1</button><button type="button" data-key="f2">F2</button>
+          <button type="button" data-key="f3">F3</button><button type="button" data-key="f4">F4</button>
+          <button type="button" data-key="f5">F5</button><button type="button" data-key="f6">F6</button>
+          <button type="button" data-key="f7">F7</button><button type="button" data-key="f8">F8</button>
+          <button type="button" data-key="f9">F9</button><button type="button" data-key="f10">F10</button>
+          <button type="button" data-key="f11">F11</button><button type="button" data-key="f12">F12</button>
+        </div>
+      </div>
+    </section>
+  </header>
+  <main>
+    <div id="stage" class="stage">
+      <section id="viewport" aria-label="被控主机画面">
+        <canvas id="screen" width="1920" height="1080" tabindex="0"></canvas>
+        <div id="message">正在建立直连通道……</div>
+      </section>
+    </div>
+  </main>
+</div>
+  <script src="/control/app.js"></script>
+</body>
+</html>

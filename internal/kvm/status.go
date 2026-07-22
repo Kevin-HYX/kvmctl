@@ -39,6 +39,7 @@ type Status struct {
 
 type ControlStatus struct {
 	State     string `json:"state"`
+	Holder    string `json:"holder,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
 

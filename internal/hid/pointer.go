@@ -28,6 +28,16 @@ func (pointer *AbsolutePointer) Move(x, y int) error {
 	return pointer.write(0, x, y, 0)
 }
 
+func (pointer *AbsolutePointer) Set(x, y int, buttons []string, wheel int) error {
+	buttonValue, err := buttonsCode(buttons)
+	if err != nil {
+		return err
+	}
+	pointer.mu.Lock()
+	defer pointer.mu.Unlock()
+	return pointer.write(buttonValue, x, y, wheel)
+}
+
 func (pointer *AbsolutePointer) Click(x, y int, button string, clicks int, interval time.Duration) error {
 	buttonCode, err := buttonCode(button)
 	if err != nil {
@@ -133,6 +143,31 @@ func (pointer *RelativePointer) Move(dx, dy int) error {
 	return nil
 }
 
+func (pointer *RelativePointer) Set(dx, dy int, buttons []string, wheel int) error {
+	buttonValue, err := buttonsCode(buttons)
+	if err != nil {
+		return err
+	}
+	pointer.mu.Lock()
+	defer pointer.mu.Unlock()
+	first := true
+	for dx != 0 || dy != 0 || first {
+		x := clamp(dx, -127, 127)
+		y := clamp(dy, -127, 127)
+		currentWheel := 0
+		if first {
+			currentWheel = wheel
+		}
+		if err := pointer.sink.Write(relativeReport(buttonValue, x, y, currentWheel)); err != nil {
+			return err
+		}
+		dx -= x
+		dy -= y
+		first = false
+	}
+	return nil
+}
+
 func (pointer *RelativePointer) Click(button string, clicks int, interval time.Duration) error {
 	buttonValue, err := buttonCode(button)
 	if err != nil {
@@ -215,6 +250,18 @@ func buttonCode(button string) (byte, error) {
 	default:
 		return 0, fmt.Errorf("unsupported pointer button %q", button)
 	}
+}
+
+func buttonsCode(buttons []string) (byte, error) {
+	var result byte
+	for _, button := range buttons {
+		value, err := buttonCode(button)
+		if err != nil {
+			return 0, err
+		}
+		result |= value
+	}
+	return result, nil
 }
 
 func movementSteps(duration time.Duration) int {

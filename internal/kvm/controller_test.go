@@ -78,3 +78,25 @@ func TestKeyPressRejectsUnknownKeyAsInvalidArgument(t *testing.T) {
 		t.Fatalf("error = %#v, want INVALID_ARGUMENT", err)
 	}
 }
+
+func TestBrowserInputStateDoesNotAutoRelease(t *testing.T) {
+	controller := kvm.NewMemoryController(kvm.MemoryOptions{
+		KeyboardConfigured: true,
+		AbsolutePointer:    true,
+		RelativePointer:    true,
+	})
+	ctx := context.Background()
+	if err := controller.SetKeyboardState(ctx, kvm.KeyboardStateRequest{Keys: []string{"ctrl", "a"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.SetPointerAbsoluteState(ctx, kvm.AbsolutePointerStateRequest{X: 500, Y: 250, Buttons: []string{"left"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.SetPointerRelativeState(ctx, kvm.RelativePointerStateRequest{DX: 3, DY: -2, Buttons: []string{"left"}}); err != nil {
+		t.Fatal(err)
+	}
+	events := controller.Events()
+	if len(events) != 3 || events[0].Kind != kvm.EventKeyboardState || events[1].Kind != kvm.EventAbsolutePointerState || events[2].Kind != kvm.EventRelativePointerState {
+		t.Fatalf("events = %#v, want three stateful events without automatic release", events)
+	}
+}

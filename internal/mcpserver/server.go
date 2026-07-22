@@ -6,7 +6,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Kevin-HYX/kvmctl/internal/control"
 	"github.com/Kevin-HYX/kvmctl/internal/kvm"
+	"github.com/Kevin-HYX/kvmctl/internal/webcontrol"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -41,7 +43,9 @@ type screenController interface {
 }
 
 type Options struct {
-	ControlLease time.Duration
+	ControlLease    time.Duration
+	Control         *control.Manager
+	BrowserSessions *webcontrol.SessionManager
 }
 
 func toolDefinition(name, description string, readOnly, idempotent bool) *mcp.Tool {
@@ -61,12 +65,19 @@ func NewWithOptions(version string, controller kvm.Controller, options Options) 
 	if options.ControlLease <= 0 {
 		options.ControlLease = 30 * time.Second
 	}
-	control := newControlManager(options.ControlLease, releaseControllerInput(controller))
+	controlManager := options.Control
+	if controlManager == nil {
+		controlManager = control.New(options.ControlLease, 5*time.Second, releaseControllerInput(controller))
+	}
+	control := newControlManagerWithArbiter(controlManager)
 	server := mcp.NewServer(
 		&mcp.Implementation{Name: "kvmctl", Version: version},
 		&mcp.ServerOptions{Instructions: "Observe the current screen when needed, then use atomic keyboard and pointer tools. All absolute coordinates use a fixed 0..1000 range."},
 	)
 	addResources(server)
+	if options.BrowserSessions != nil {
+		addBrowserSessionTools(server, options.BrowserSessions)
+	}
 
 	mcp.AddTool(server, toolDefinition("get_status", "Report configured KVM capabilities, their current runtime state, and control ownership without exposing secrets.", true, true), func(ctx context.Context, _ *mcp.CallToolRequest, _ emptyArguments) (*mcp.CallToolResult, any, error) {
 		status := controller.Status(ctx)
@@ -164,6 +175,45 @@ func NewWithOptions(version string, controller kvm.Controller, options Options) 
 	return server
 }
 
+func addBrowserSessionTools(server *mcp.Server, sessions *webcontrol.SessionManager) {
+	mcp.AddTool(server, toolDefinition("browser_session_open", "Create a single-use browser control entry URL. The URL expires after ten minutes and cannot be created while another entry or browser session exists.", false, false), func(_ context.Context, _ *mcp.CallToolRequest, _ emptyArguments) (*mcp.CallToolResult, any, error) {
+		entry, err := sessions.Open()
+		if err != nil {
+			var busy *webcontrol.BusyError
+			if errors.As(err, &busy) {
+				return structuredToolError(busy)
+			}
+			return operationErrorResult(err)
+		}
+		return structuredToolResult(entry)
+	})
+	mcp.AddTool(server, toolDefinition("browser_session_status", "Report the global browser control lifecycle state without returning entry or session secrets.", true, true), func(_ context.Context, _ *mcp.CallToolRequest, _ emptyArguments) (*mcp.CallToolResult, any, error) {
+		return structuredToolResult(sessions.Status())
+	})
+	mcp.AddTool(server, toolDefinition("browser_session_close", "Revoke a pending browser entry or immediately end the active browser session and release all browser input state.", false, true), func(_ context.Context, _ *mcp.CallToolRequest, _ emptyArguments) (*mcp.CallToolResult, any, error) {
+		result := struct {
+			Closed bool `json:"closed"`
+		}{Closed: sessions.Close()}
+		return structuredToolResult(result)
+	})
+}
+
+func structuredToolResult(value any) (*mcp.CallToolResult, any, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(encoded)}}}, value, nil
+}
+
+func structuredToolError(value any) (*mcp.CallToolResult, any, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: string(encoded)}}}, value, nil
+}
+
 func addResources(server *mcp.Server) {
 	resources := map[string]struct {
 		name        string
@@ -173,7 +223,7 @@ func addResources(server *mcp.Server) {
 		"kvmctl://guide": {
 			name:        "kvmctl control guide",
 			description: "Recommended AI control loop, coordinate system, and safety boundaries.",
-			text:        "Call get_status to inspect runtime availability. Call get_screen when visual context is needed. Coordinate images and absolute pointer tools use the same normalized 0..1000 space: top-left is 0,0 and bottom-right is 1000,1000, independent of resolution. Absolute input does not require a prior screenshot or frame ID. Use atomic input tools only; every click, drag, and key press releases its input state. Use relative movement as a BIOS/UEFI fallback; its units are HID counts, not pixels.",
+			text:        "Call get_status to inspect runtime availability. Call get_screen when visual context is needed. Coordinate images and absolute pointer tools use the same normalized 0..1000 space: top-left is 0,0 and bottom-right is 1000,1000, independent of resolution. Absolute input does not require a prior screenshot or frame ID. Use atomic input tools only; every click, drag, and key press releases its input state. Use relative movement as a BIOS/UEFI fallback; its units are HID counts, not pixels. In unified serve mode, browser_session_open creates one single-use human control URL, browser_session_status reports its lifecycle, and browser_session_close revokes it. Human browser input preempts MCP input and releases control after five seconds without input.",
 		},
 		"kvmctl://key-names": {
 			name:        "kvmctl key names",

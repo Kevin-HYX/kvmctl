@@ -10,10 +10,12 @@ import (
 type KeyboardDevice interface {
 	Press([]string, time.Duration) error
 	Type(string, time.Duration) error
+	Set([]string) error
 	Release() error
 }
 
 type AbsolutePointerDevice interface {
+	Set(x, y int, buttons []string, wheel int) error
 	Move(x, y int) error
 	Click(x, y int, button string, clicks int, interval time.Duration) error
 	Drag(fromX, fromY, toX, toY int, button string, duration time.Duration) error
@@ -21,6 +23,7 @@ type AbsolutePointerDevice interface {
 }
 
 type RelativePointerDevice interface {
+	Set(dx, dy int, buttons []string, wheel int) error
 	Move(dx, dy int) error
 	Click(button string, clicks int, interval time.Duration) error
 	Drag(dx, dy int, button string, duration time.Duration) error
@@ -131,6 +134,36 @@ func (controller *HardwareController) TypeText(_ context.Context, request TypeTe
 		request.IntervalMS = 20
 	}
 	return wrapInputError(controller.keyboard.Type(request.Text, time.Duration(request.IntervalMS)*time.Millisecond))
+}
+
+func (controller *HardwareController) SetKeyboardState(_ context.Context, request KeyboardStateRequest) error {
+	if controller.keyboard == nil {
+		return capabilityNotConfigured("keyboard")
+	}
+	if err := validateKeyboardState(request); err != nil {
+		return err
+	}
+	return wrapInputError(controller.keyboard.Set(request.Keys))
+}
+
+func (controller *HardwareController) SetPointerAbsoluteState(_ context.Context, request AbsolutePointerStateRequest) error {
+	if controller.absolutePointer == nil {
+		return capabilityNotConfigured("absolute pointer")
+	}
+	if err := validateAbsolutePointerState(request); err != nil {
+		return err
+	}
+	return wrapInputError(controller.absolutePointer.Set(request.X, request.Y, request.Buttons, request.Wheel))
+}
+
+func (controller *HardwareController) SetPointerRelativeState(_ context.Context, request RelativePointerStateRequest) error {
+	if controller.relativePointer == nil {
+		return capabilityNotConfigured("relative pointer")
+	}
+	if err := validateRelativePointerState(request); err != nil {
+		return err
+	}
+	return wrapInputError(controller.relativePointer.Set(request.DX, request.DY, request.Buttons, request.Wheel))
 }
 
 func (controller *HardwareController) MouseMoveAbsolute(_ context.Context, request AbsoluteMoveRequest) error {
