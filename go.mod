@@ -6,7 +6,7 @@ require (
 	github.com/blackjack/webcam v0.6.1
 	github.com/coder/websocket v1.8.15
 	github.com/modelcontextprotocol/go-sdk v1.6.1
-	github.com/pelletier/go-toml/v2 v2.2.4
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pion/webrtc/v4 v4.1.6
 	golang.org/x/sys v0.41.0
 )
